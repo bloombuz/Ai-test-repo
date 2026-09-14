@@ -10,6 +10,7 @@ export interface DemoCreativeItem {
   brand: string;
   mediaType: 'image' | 'video';
   durationSec?: number;
+  strobeHazard?: boolean;
   targetAspect: string;
   wordCount: number;
   contrastProfile: 'Low Contrast' | 'High Contrast' | 'Micro-Text & QR' | 'Dynamic Strobe Hazard' | 'Subtle Washout';

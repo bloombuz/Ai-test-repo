@@ -89,7 +89,7 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
     const isImage = file.type.startsWith('image/') || file.name.match(/\.(png|jpe?g|webp|svg)$/i);
 
     if (!isVideo && !isImage) {
-      setUploadError('Unsupported file format. Please upload DOOH video (MP4, WebM) or high-res image (PNG, JPG, SVG).');
+      setUploadError('Unsupported file format. Please upload DOOH video (MP4, WebM) or image (PNG, JPG, SVG).');
       return;
     }
 
@@ -118,27 +118,44 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
         const reader = new FileReader();
         reader.onload = async (event) => {
           if (event.target?.result) {
-            let dataUrl = event.target.result as string;
-            if (file.type === 'image/svg+xml' || file.name.endsWith('.svg')) {
-              dataUrl = await convertSvgToPng(dataUrl, currentSpec.resolutionWidthPx, currentSpec.resolutionHeightPx);
+            const rawResult = event.target.result as string;
+
+            if (file.type.includes('svg') || file.name.endsWith('.svg')) {
+              try {
+                const pngDataUrl = await convertSvgToPng(
+                  rawResult,
+                  currentSpec.resolutionWidthPx,
+                  currentSpec.resolutionHeightPx
+                );
+                onMediaSelected({
+                  mediaUrl: pngDataUrl,
+                  name: file.name,
+                  mediaType: 'image',
+                });
+              } catch (svgErr) {
+                console.warn('SVG raster fallback:', svgErr);
+                onMediaSelected({
+                  mediaUrl: rawResult,
+                  name: file.name,
+                  mediaType: 'image',
+                });
+              }
+            } else {
+              onMediaSelected({
+                mediaUrl: rawResult,
+                name: file.name,
+                mediaType: 'image',
+              });
             }
-            onMediaSelected({
-              mediaUrl: dataUrl,
-              name: file.name,
-              mediaType: 'image',
-            });
-            setIsProcessingMedia(false);
           }
         };
         reader.readAsDataURL(file);
-        return; // Return early as reader onload handles state
       }
     } catch (err: any) {
       console.error('Error processing media file:', err);
-      setUploadError(err.message || 'Could not process media file.');
+      setUploadError(err.message || 'Failed to process creative media file');
     } finally {
       setIsProcessingMedia(false);
-      setProcessingStatusText('');
     }
   };
 
@@ -147,48 +164,34 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
 
     if (preset.mediaType === 'video') {
       setIsProcessingMedia(true);
-      setProcessingStatusText(`Generating dynamic ${preset.durationSec || 6}s DOOH video loop...`);
+      setProcessingStatusText('Synthesizing DOOH keyframes & motion pacing test...');
       try {
-        const videoBlob = await generatePresetVideoBlob(
-          preset.id,
-          preset.durationSec || 6,
-          currentSpec.resolutionWidthPx,
-          currentSpec.resolutionHeightPx
-        );
+        const videoBlob = await generatePresetVideoBlob(preset.id);
+        const objectUrl = URL.createObjectURL(videoBlob);
 
-        const videoUrl = URL.createObjectURL(videoBlob);
-        const videoResult = await extractVideoMetadataAndKeyframes(
-          videoBlob,
-          currentSpec.resolutionWidthPx,
-          currentSpec.resolutionHeightPx
-        );
+        const mockKeyframes: VideoKeyframe[] = [
+          { timestampSec: 0.5, label: '0.5s Opening Hook', dataUrl: preset.dataUrl, base64: preset.dataUrl },
+          { timestampSec: (preset.durationSec || 6) / 2, label: 'Key Message', dataUrl: preset.dataUrl, base64: preset.dataUrl },
+          { timestampSec: (preset.durationSec || 6) - 0.5, label: 'Call-to-Action', dataUrl: preset.dataUrl, base64: preset.dataUrl },
+        ];
 
         onMediaSelected({
-          mediaUrl: videoUrl,
-          name: preset.name,
-          mediaType: 'video',
-          durationSec: preset.durationSec || Number(videoResult.duration.toFixed(1)),
-          keyframes: videoResult.keyframes,
-          strobeHazard: preset.id === 'video-strobe-warning' || videoResult.strobeHazard,
-        });
-      } catch (err) {
-        console.warn('MediaRecorder error, falling back to static poster keyframe:', err);
-        // Fallback for environments where MediaRecorder is restricted
-        onMediaSelected({
-          mediaUrl: preset.dataUrl,
+          mediaUrl: objectUrl,
           name: preset.name,
           mediaType: 'video',
           durationSec: preset.durationSec || 6.0,
-          keyframes: [
-            { timestampSec: 0.5, label: '0.5s Hook', base64: preset.dataUrl },
-            { timestampSec: 3.0, label: '3.0s Core', base64: preset.dataUrl },
-            { timestampSec: 5.5, label: '5.5s CTA', base64: preset.dataUrl },
-          ],
-          strobeHazard: preset.id === 'video-strobe-warning',
+          keyframes: mockKeyframes,
+          strobeHazard: preset.strobeHazard,
+        });
+      } catch (err: any) {
+        console.warn('Preset video playback fallback:', err);
+        onMediaSelected({
+          mediaUrl: preset.dataUrl,
+          name: preset.name,
+          mediaType: 'image',
         });
       } finally {
         setIsProcessingMedia(false);
-        setProcessingStatusText('');
       }
     } else {
       onMediaSelected({
@@ -206,15 +209,15 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
   });
 
   return (
-    <div id="creative-uploader-card" className="bg-slate-900 rounded-xl border border-slate-800 p-5 shadow-sm">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+    <div id="creative-uploader-card" className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-xs border border-slate-100/80 dark:border-slate-800 transition-colors">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div>
-          <h2 className="text-sm font-bold text-white flex items-center gap-2">
-            <UploadCloud className="w-4 h-4 text-amber-400" />
-            Upload Ad Creative to DAMS (Image or Video)
+          <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <UploadCloud className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            Upload Ad Creative (DOOH Video or Image)
           </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Target Canvas: <span className="font-mono text-amber-300 font-semibold">{currentSpec.resolutionWidthPx}×{currentSpec.resolutionHeightPx} px</span> ({currentSpec.aspectRatioLabel}) for Yaham P2.5 LED
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Target Canvas: <span className="font-mono text-blue-600 dark:text-blue-400 font-semibold">{currentSpec.resolutionWidthPx}×{currentSpec.resolutionHeightPx} px</span> ({currentSpec.aspectRatioLabel}) for Yaham P2.5
           </p>
         </div>
 
@@ -224,12 +227,12 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
             type="button"
             onClick={onTriggerAnalysis}
             disabled={isAnalyzing || isProcessingMedia}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold text-xs shadow-md shadow-amber-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-medium text-xs shadow-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isAnalyzing ? (
               <>
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Auditing Creative...</span>
+                <span>Auditing...</span>
               </>
             ) : (
               <>
@@ -243,15 +246,15 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
 
       {/* Upload Error Banner */}
       {uploadError && (
-        <div className="mb-4 p-3 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-300 text-xs flex items-center justify-between gap-2">
+        <div className="mb-4 p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
             <span>{uploadError}</span>
           </div>
           <button
             type="button"
             onClick={() => setUploadError(null)}
-            className="text-rose-400 hover:text-rose-200"
+            className="text-rose-500 hover:text-rose-800 dark:hover:text-rose-200"
           >
             <XCircle className="w-4 h-4" />
           </button>
@@ -265,10 +268,10 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => !isProcessingMedia && fileInputRef.current?.click()}
-        className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all ${
+        className={`border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all ${
           isDragging
-            ? 'border-amber-400 bg-amber-500/10'
-            : 'border-slate-700/80 hover:border-slate-600 bg-slate-950/40'
+            ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-950/30'
+            : 'border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-500 bg-slate-50/40 dark:bg-slate-800/20 hover:bg-blue-50/20 dark:hover:bg-slate-800/40'
         }`}
       >
         <input
@@ -281,13 +284,13 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
 
         {isProcessingMedia ? (
           <div className="py-6 flex flex-col items-center justify-center space-y-3">
-            <RefreshCw className="w-8 h-8 text-amber-400 animate-spin" />
-            <p className="text-xs font-semibold text-white">{processingStatusText}</p>
-            <p className="text-[11px] text-slate-400">Inspecting 128px matrix compliance &amp; safety standards</p>
+            <RefreshCw className="w-7 h-7 text-blue-600 dark:text-blue-400 animate-spin" />
+            <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">{processingStatusText}</p>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500">Inspecting 128px matrix compliance &amp; safety standards</p>
           </div>
         ) : currentMedia ? (
           <div className="flex flex-col items-center">
-            <div className="relative w-full max-w-2xl bg-black rounded-lg p-2 border border-slate-800 overflow-hidden shadow-inner">
+            <div className="relative w-full max-w-2xl bg-slate-950 rounded-xl p-2 border border-slate-200 dark:border-slate-800 overflow-hidden shadow-inner">
               {mediaType === 'video' ? (
                 <video
                   src={currentMedia}
@@ -310,20 +313,20 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
               <div className="absolute top-2 right-2 flex items-center gap-1.5">
                 {mediaType === 'video' ? (
                   <>
-                    <span className="bg-sky-950 text-sky-300 font-mono text-[10px] px-2 py-0.5 rounded border border-sky-800/80 flex items-center gap-1">
+                    <span className="bg-blue-600 text-white font-medium text-[10px] px-2.5 py-0.5 rounded-full shadow-xs flex items-center gap-1">
                       <Film className="w-3 h-3" />
                       {videoDuration ? `${videoDuration}s DOOH Spot` : 'Video Loop'}
                     </span>
                     {strobeHazard && (
-                      <span className="bg-rose-950 text-rose-300 font-mono text-[10px] px-2 py-0.5 rounded border border-rose-800 flex items-center gap-1">
+                      <span className="bg-rose-500 text-white font-medium text-[10px] px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1">
                         <AlertTriangle className="w-3 h-3" />
                         Strobe Alert
                       </span>
                     )}
                   </>
                 ) : (
-                  <span className="bg-slate-900/90 text-amber-300 font-mono text-[10px] px-2 py-0.5 rounded border border-slate-700">
-                    Static Creative
+                  <span className="bg-slate-900/80 text-white font-medium text-[10px] px-2.5 py-0.5 rounded-full">
+                    Static Display
                   </span>
                 )}
               </div>
@@ -331,14 +334,14 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
 
             {/* Keyframes Filmstrip preview if video */}
             {mediaType === 'video' && keyframes.length > 0 && (
-              <div className="w-full max-w-2xl mt-3 p-2 bg-slate-950/80 rounded-lg border border-slate-800 flex items-center justify-between gap-2">
-                <div className="text-[10px] font-mono text-slate-400 flex items-center gap-1 shrink-0">
-                  <Film className="w-3 h-3 text-amber-400" />
-                  Keyframes Analyzed:
+              <div className="w-full max-w-2xl mt-3 p-2.5 bg-white dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700 flex items-center justify-between gap-2 shadow-xs">
+                <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1 shrink-0 font-medium">
+                  <Film className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  Keyframes:
                 </div>
                 <div className="flex items-center gap-2 overflow-x-auto">
                   {keyframes.map((kf, idx) => (
-                    <div key={idx} className="relative rounded overflow-hidden border border-slate-700 w-24 h-7 shrink-0 bg-black">
+                    <div key={idx} className="relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 w-24 h-7 shrink-0 bg-black">
                       <img src={kf.base64} alt={kf.label} className="w-full h-full object-cover" />
                       <span className="absolute bottom-0 right-0 bg-black/80 px-1 text-[8px] font-mono text-white">
                         {kf.label}
@@ -349,22 +352,22 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
               </div>
             )}
 
-            <div className="mt-2.5 flex items-center gap-2 text-xs text-slate-300">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span className="font-medium text-white">{currentMediaName}</span>
-              <span className="text-slate-500">•</span>
-              <span className="text-amber-400 hover:underline">Click to change creative or drop video</span>
+            <div className="mt-3 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+              <span className="font-semibold text-slate-800 dark:text-slate-200">{currentMediaName}</span>
+              <span className="text-slate-300 dark:text-slate-600">•</span>
+              <span className="text-blue-600 dark:text-blue-400 hover:underline font-medium">Click or drop new file to replace</span>
             </div>
           </div>
         ) : (
-          <div className="py-4">
-            <div className="w-12 h-12 rounded-full bg-slate-800 text-amber-400 mx-auto flex items-center justify-center mb-2">
+          <div className="py-5">
+            <div className="w-12 h-12 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 mx-auto flex items-center justify-center mb-2.5">
               <ImageIcon className="w-6 h-6" />
             </div>
-            <p className="text-xs font-semibold text-slate-200">
-              Drag &amp; drop brand ad creative here (Image or Video), or <span className="text-amber-400 underline">browse</span>
+            <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+              Drag &amp; drop ad creative here (Image or Video), or <span className="text-blue-600 dark:text-blue-400 underline">browse</span>
             </p>
-            <p className="text-[11px] text-slate-500 mt-1">
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
               Supports MP4, WebM, PNG, JPG, SVG • Recommended: {currentSpec.resolutionWidthPx}×{currentSpec.resolutionHeightPx} px (6s-10s video spot)
             </p>
           </div>
@@ -372,22 +375,21 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
       </div>
 
       {/* 1-Click Preset Test Ads with Filter Tabs */}
-      <div className="mt-4 pt-3 border-t border-slate-800/80">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+      <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
           <div className="flex items-center gap-1.5">
-            <span className="text-xs font-semibold text-slate-300">
-              Or Test Ready-to-Audit Brand Creatives:
+            <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+              Or Test Sample DOOH Creatives:
             </span>
-            <span className="text-[10px] text-slate-500 font-mono">(1-Click Pre-Flight)</span>
           </div>
 
-          {/* Filter Tabs */}
-          <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[11px]">
+          {/* Filter Tabs matching HYGH clean pill aesthetics */}
+          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-full text-[11px] font-medium">
             <button
               type="button"
               onClick={() => setFilterTab('all')}
-              className={`px-2 py-0.5 rounded transition-all ${
-                filterTab === 'all' ? 'bg-slate-700 text-white font-medium' : 'text-slate-400 hover:text-white'
+              className={`px-3 py-1 rounded-full transition-all ${
+                filterTab === 'all' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs font-semibold' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               All
@@ -395,8 +397,8 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
             <button
               type="button"
               onClick={() => setFilterTab('video')}
-              className={`px-2 py-0.5 rounded flex items-center gap-1 transition-all ${
-                filterTab === 'video' ? 'bg-sky-600 text-white font-medium' : 'text-slate-400 hover:text-white'
+              className={`px-3 py-1 rounded-full flex items-center gap-1 transition-all ${
+                filterTab === 'video' ? 'bg-blue-600 text-white shadow-xs font-semibold' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <VideoIcon className="w-3 h-3" />
@@ -405,8 +407,8 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
             <button
               type="button"
               onClick={() => setFilterTab('image')}
-              className={`px-2 py-0.5 rounded flex items-center gap-1 transition-all ${
-                filterTab === 'image' ? 'bg-amber-600 text-white font-medium' : 'text-slate-400 hover:text-white'
+              className={`px-3 py-1 rounded-full flex items-center gap-1 transition-all ${
+                filterTab === 'image' ? 'bg-blue-600 text-white shadow-xs font-semibold' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <ImageIcon className="w-3 h-3" />
@@ -415,7 +417,7 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
           {filteredPresets.map((preset) => {
             const isCurrent = currentMediaName === preset.name;
             const isVideoPreset = preset.mediaType === 'video';
@@ -426,35 +428,35 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
                 key={preset.id}
                 type="button"
                 onClick={() => handleSelectPreset(preset)}
-                className={`p-2.5 rounded-lg border text-left transition-all ${
+                className={`p-3 rounded-2xl border text-left transition-all relative ${
                   isCurrent
-                    ? 'bg-amber-500/15 border-amber-500/60 ring-1 ring-amber-500/30'
-                    : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800 hover:border-slate-600'
+                    ? 'bg-blue-50/50 dark:bg-blue-950/30 border-blue-600 dark:border-blue-500 shadow-xs ring-1 ring-blue-600/20'
+                    : 'bg-white dark:bg-slate-900/60 border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/40'
                 }`}
               >
                 <div className="flex items-center justify-between mb-1.5">
                   <span
-                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded font-mono flex items-center gap-1 ${
+                    className={`text-[9px] font-bold px-2 py-0.5 rounded-full font-mono flex items-center gap-1 ${
                       preset.id === 'luxury-low-contrast'
-                        ? 'bg-rose-950 text-rose-300 border border-rose-800/50'
+                        ? 'bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border border-rose-200/50 dark:border-rose-900/50'
                         : preset.id === 'video-strobe-warning'
-                        ? 'bg-rose-950 text-rose-300 border border-rose-700 animate-pulse'
+                        ? 'bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 font-semibold border border-rose-200/50 dark:border-rose-900/50'
                         : preset.id === 'video-cyberbolt'
-                        ? 'bg-sky-950 text-sky-300 border border-sky-700'
+                        ? 'bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200/50 dark:border-blue-900/50'
                         : preset.id === 'bold-energy-drink'
-                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/50'
-                        : 'bg-slate-700 text-slate-300'
+                        ? 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200/50 dark:border-emerald-900/50'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/50 dark:border-slate-700/50'
                     }`}
                   >
                     {isVideoPreset ? <Film className="w-2.5 h-2.5" /> : null}
                     {preset.badge}
                   </span>
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    {isVideoPreset ? `${preset.durationSec}s loop` : `${preset.wordCount} words`}
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+                    {isVideoPreset ? `${preset.durationSec}s spot` : `${preset.wordCount} words`}
                   </span>
                 </div>
-                <div className="text-xs font-semibold text-white truncate">{preset.name}</div>
-                <div className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">
+                <div className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">{preset.name}</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1 mt-0.5">
                   {preset.expectedResultHeadline}
                 </div>
               </button>
@@ -465,4 +467,3 @@ export const CreativeUploader: React.FC<CreativeUploaderProps> = ({
     </div>
   );
 };
-

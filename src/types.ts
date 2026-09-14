@@ -1,5 +1,26 @@
 export type P25DisplayModelId = 'YHT-V3.12-P2.5' | 'YHT-V3.22-P2.5' | 'YHT-V7.0-P2.5';
 
+export type DisplayMode = 'single' | 'loop6';
+
+export type LightingMode = 'sunlight' | 'overcast' | 'night';
+
+export type SunIntensityPreset = 'high-noon' | 'angled' | 'golden';
+
+export interface PlaylistItem {
+  id: string;
+  name: string;
+  brand: string;
+  mediaType: 'image' | 'video';
+  mediaUrl: string;
+  durationSec?: number;
+  originalDurationSec?: number;
+  keyframes?: VideoKeyframe[];
+  strobeHazard?: boolean;
+  thumbnailUrl?: string;
+  contrastProfile?: string;
+  badge?: string;
+}
+
 export interface P25DisplaySpec {
   id: P25DisplayModelId;
   name: string;
