@@ -1,0 +1,6 @@
+{
+  "name": "Taxi Top LED AI Creative Advisor",
+  "description": "Real-time AI creative advisor for P2.5 taxi top LED digital out-of-home advertising displays, analyzing contrast, word count, 128px matrix legibility, and sunlight visibility.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
